@@ -14,7 +14,11 @@ const currentFile = fileURLToPath(import.meta.url);
 const projectRoot = path.dirname(currentFile);
 const publicRoot = path.join(projectRoot, 'public');
 
-await initializeDatabase();
+try {
+  await initializeDatabase();
+} catch (error) {
+  console.error('Database initialization failed. Static pages will still be served.', error);
+}
 
 app.use(cors());
 app.use(express.json());
