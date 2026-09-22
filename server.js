@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import authRoutes from './src/routes/auth.js';
 import userRoutes from './src/routes/users.js';
 import registrationRoutes from './src/routes/registrations.js';
-import { initializeDatabase } from './src/config/database.js';
+import { connectDatabase, databaseErrorMessage, databaseStatus, initializeDatabase } from './src/config/database.js';
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -70,17 +70,45 @@ app.get('/api', (req, res) => {
   });
 });
 
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
+  const status = databaseStatus();
+  if (!status.connected && status.configured) {
+    try {
+      await connectDatabase();
+    } catch (error) {
+      return res.json({
+        success: true,
+        status: 'degraded',
+        database: 'unavailable',
+        message: databaseErrorMessage(error),
+        uptime: process.uptime(),
+      });
+    }
+  }
+  const current = databaseStatus();
   res.json({
     success: true,
-    status: 'ok',
+    status: current.connected ? 'ok' : 'degraded',
+    database: current.connected ? 'connected' : 'unavailable',
+    message: current.connected ? 'Database connected' : databaseErrorMessage(),
     uptime: process.uptime(),
   });
 });
 
-app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api', registrationRoutes);
+const catchAsync = (router) => {
+  router.stack.forEach((layer) => {
+    if (!layer.route) return;
+    layer.route.stack.forEach((routeLayer) => {
+      const handle = routeLayer.handle;
+      routeLayer.handle = (req, res, next) => Promise.resolve(handle(req, res, next)).catch(next);
+    });
+  });
+  return router;
+};
+
+app.use('/api/auth', catchAsync(authRoutes));
+app.use('/api/users', catchAsync(userRoutes));
+app.use('/api', catchAsync(registrationRoutes));
 
 app.use((req, res) => {
   res.status(404).json({
@@ -89,9 +117,18 @@ app.use((req, res) => {
   });
 });
 
+app.use((error, req, res, next) => {
+  console.error(error);
+  if (res.headersSent) return next(error);
+  res.status(500).json({
+    success: false,
+    message: databaseErrorMessage(error),
+  });
+});
+
 if (!process.env.VERCEL && !process.env.NETLIFY) {
-  app.listen(port, () => {
-    console.log(`Server is running on http://localhost:${port}`);
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`Server is running on http://0.0.0.0:${port}`);
   });
 }
 

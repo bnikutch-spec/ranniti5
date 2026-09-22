@@ -120,18 +120,20 @@ router.post('/login', async (req, res) => {
 
   const normalizedLogin = normalizeLoginValue(loginValue);
   const users = await collection('users');
+  const escapedLogin = normalizedLogin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const user = await users.findOne({
     $or: [
       { email: normalizedLogin },
       { username: normalizedLogin },
-      { name: { $regex: `^${normalizedLogin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } },
+      { email: { $regex: `^${escapedLogin}$`, $options: 'i' } },
+      { name: { $regex: `^${escapedLogin}$`, $options: 'i' } },
     ],
   });
 
-  if (!user) {
+  if (!user || !user.password_hash) {
     return res.status(401).json({
       success: false,
-      message: 'Invalid email or password',
+      message: user ? 'This account has no password yet. Register with the same email to set one.' : 'Invalid email or password',
     });
   }
 

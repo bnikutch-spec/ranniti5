@@ -7,20 +7,46 @@ import { adminMiddleware, authMiddleware } from '../middleware/authMiddleware.js
 import { createArtifacts, sendConfirmationEmail } from '../services/documents.js';
 
 const router = express.Router();
-const packages = { 'Triple Occupancy': 17698.82, 'Double Occupancy': 20648.82, '1 Member + 1 Family Member + 1 Kid (Up to 5 years)': 29999, '1 Member + 1 Family Member + 1 Kid (Above 5 years)': 34999 };
+const packages = {
+  'Triple Occupancy': 17698.82,
+  'Double Occupancy': 20648.82,
+  '1 Member + 1 Spouse + 1 Kid (Up to 5 years)': 29999,
+  '1 Member + 1 Family Member + 1 Kid (Up to 5 years)': 29999,
+  '1 Member + 1 Spouse + 1 Kid (Above 5 years)': 34999,
+  '1 Member + 1 Family Member + 1 Kid (Above 5 years)': 34999,
+};
 const publicRegistration = (r) => ({ ...r, registrationId: r.id, package: r.package_name, paymentStatus: r.payment_status, transactionId: r.transaction_id, paymentDate: r.payment_date, entryPassNumber: r.pass_number, invoiceNumber: r.invoice_number });
 
 router.post('/registrations', async (req, res) => {
   const body = req.body || {};
-  const amount = packages[body.package] || Number(body.amount);
-  if (!body.fullName || !body.email || !body.password || body.password.length < 8 || !body.package || !amount) return res.status(400).json({ success: false, message: 'Name, email, password (8+ characters), package and amount are required' });
+  const packageName = String(body.package || '').trim();
+  const amount = packages[packageName] || Number(body.amount);
+  const name = String(body.fullName || body.name || '').trim();
+  const email = String(body.email || '').trim().toLowerCase();
+  const password = String(body.password || '');
+  const attendeeNames = (Array.isArray(body.attendeeNames) ? body.attendeeNames : [body.attendee1, body.attendee2, body.attendee3, body.attendee4])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  if (!name || !email || password.length < 8 || !packageName || !amount) {
+    return res.status(400).json({ success: false, message: !packages[packageName] && packageName ? `Unknown package: ${packageName}` : 'Name, email, password (8+ characters) and package are required' });
+  }
   const id = `RN5-REG-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
   const now = new Date().toISOString();
-  await (await collection('registrations')).insertOne({ id, full_name: body.fullName.trim(), email: body.email.trim().toLowerCase(), mobile: body.mobile || '', company: body.company || '', guest_name: body.guestName || '', region: body.region || '', chapter: body.chapter || '', gst_number: body.gstNumber || '', city: body.city || '', date_of_birth: body.dateOfBirth || '', hoodie_size: body.hoodieSize || '', business_intent: body.businessIntent || '', package_name: body.package, amount, status: 'Pending', created_at: now, updated_at: now });
+  const guestName = body.guestName || attendeeNames.slice(1).join(', ');
+  await (await collection('registrations')).insertOne({ id, full_name: name, email, mobile: body.mobile || '', company: body.company || '', guest_name: guestName, attendee_names: attendeeNames, region: body.region || '', chapter: body.chapter || '', gst_number: String(body.gstNumber || '').toUpperCase(), city: body.city || '', date_of_birth: body.dateOfBirth || '', hoodie_size: body.hoodieSize || '', business_intent: body.businessIntent || '', package_name: packageName, amount, status: 'Pending', created_at: now, updated_at: now });
   const users = await collection('users');
-  const email = body.email.trim().toLowerCase();
-  if (!await users.findOne({ email })) await users.insertOne({ id: uuidv4(), name: body.fullName.trim(), email, password_hash: await bcrypt.hash(body.password, 12), role: 'user', created_at: now, updated_at: now });
-  return res.status(201).json({ success: true, registration: { id, amount, package: body.package } });
+  const adminEmail = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+  const role = adminEmail && email === adminEmail ? 'admin' : 'user';
+  const existing = await users.findOne({ email });
+  let accountCreated = false;
+  if (!existing) {
+    await users.insertOne({ id: uuidv4(), name, username: email, email, password_hash: await bcrypt.hash(password, 12), role, created_at: now, updated_at: now });
+    accountCreated = true;
+  } else if (!existing.password_hash) {
+    await users.updateOne({ _id: existing._id }, { $set: { password_hash: await bcrypt.hash(password, 12), username: existing.username || email, name: existing.name || name, role: existing.role === 'admin' ? 'admin' : role, updated_at: now } });
+    accountCreated = true;
+  }
+  return res.status(201).json({ success: true, accountCreated, accountExists: Boolean(existing), registration: { id, amount, package: packageName } });
 });
 
 router.get('/member/dashboard', authMiddleware, async (req, res) => {

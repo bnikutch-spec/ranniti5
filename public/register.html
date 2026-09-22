@@ -273,11 +273,12 @@
         });
       }
 
+      fetch('/api/health').then((response) => response.json()).then((body) => { if (body.database && body.database !== 'connected' && body.message) { const note = document.getElementById('formSuccess'); note.textContent = body.message; note.style.display = 'block'; } }).catch(() => {});
       document.getElementById('registrationForm').addEventListener('submit', (event) => {
         event.preventDefault();
         const data = Object.fromEntries(new FormData(event.currentTarget).entries());
         fetch('/api/registrations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
-          .then((response) => response.json().then((body) => ({ response, body })))
+          .then(async (response) => { const raw = await response.text(); let body = {}; try { body = raw ? JSON.parse(raw) : {}; } catch { body = { message: raw.slice(0, 180) || 'Server error' }; } return { response, body }; })
           .then(({ response, body }) => { if (!response.ok) throw new Error(body.message || 'Unable to create registration'); window.location.href = '/payment?registrationId=' + encodeURIComponent(body.registration.id) + '&package=' + encodeURIComponent(packageSelect.value); })
           .catch((error) => { document.getElementById('formSuccess').textContent = error.message; document.getElementById('formSuccess').style.display = 'block'; });
       });

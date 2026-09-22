@@ -1,9 +1,26 @@
 import { MongoClient } from 'mongodb';
 import 'dotenv/config';
 
-const isServerless = Boolean(process.env.VERCEL || process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME);
-const mongoUri = process.env.MONGODB_URI || (isServerless ? '' : 'mongodb://127.0.0.1:27017');
+const isHosted = Boolean(process.env.RENDER || process.env.VERCEL || process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const configuredUri = process.env.MONGODB_URI || process.env.MONGO_URI || process.env.MONGO_URL || process.env.DATABASE_URL || '';
+const mongoUri = String(configuredUri).trim().replace(/^['"]|['"]$/g, '') || (isHosted ? '' : 'mongodb://127.0.0.1:27017');
 const databaseName = process.env.MONGODB_DB || 'ranniti5';
+let lastDatabaseError = '';
+
+export const databaseStatus = () => ({
+  configured: Boolean(mongoUri),
+  connected: Boolean(database),
+  error: lastDatabaseError,
+});
+
+export const databaseErrorMessage = (error) => {
+  const text = String(error?.message || error || lastDatabaseError || '');
+  if (!mongoUri) return 'Database is not configured. In Render, add MONGODB_URI and MONGODB_DB, then redeploy.';
+  if (/authentication failed|bad auth/i.test(text)) return 'MongoDB rejected the username or password in MONGODB_URI. If the password contains @, :, / or #, URL-encode it.';
+  if (/ENOTFOUND|ECONNREFUSED|timed out|ServerSelection|MongoNetwork|querySrv|EAI_AGAIN/i.test(text)) return 'Cannot reach MongoDB. In Atlas Network Access, allow 0.0.0.0/0, then check MONGODB_URI.';
+  if (/E11000|duplicate key/i.test(text)) return 'This email is already registered. Sign in with the password you used before.';
+  return text || 'Database error. Check the Render logs and MONGODB_URI.';
+};
 let client;
 let database;
 let connecting;
@@ -14,12 +31,14 @@ export const connectDatabase = async () => {
     throw new Error('Database is not configured. Set MONGODB_URI in the hosting environment.');
   }
   if (!connecting) {
-    connecting = MongoClient.connect(mongoUri, { serverSelectionTimeoutMS: 8000 }).then((connectedClient) => {
+    connecting = MongoClient.connect(mongoUri, { serverSelectionTimeoutMS: 10000, family: 4 }).then((connectedClient) => {
       client = connectedClient;
       database = client.db(databaseName);
+      lastDatabaseError = '';
       return database;
     }).catch((error) => {
       connecting = undefined;
+      lastDatabaseError = error.message;
       throw error;
     });
   }
