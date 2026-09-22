@@ -57,6 +57,14 @@ Netlify uses the included `netlify.toml` and `netlify/functions/server.js`. No p
 
 The registration, payment, and confirmation pages are available at `/register`, `/payment`, and `/confirmation`.
 
+## Render
+
+Deploy branch `arena/01a0c8ee-ranniti5` (or `main` after that branch is merged). Leave the root directory empty and set the start command to `npm start`.
+
+Sign-in and registration need a MongoDB database. In the Render service environment, set `MONGODB_URI` to the Atlas connection string and `MONGODB_DB` to `ranniti5`. In Atlas Network Access, allow `0.0.0.0/0` so Render can connect. If the database password contains `@`, `:`, `/` or `#`, URL-encode it in the connection string.
+
+`/api/health` reports `database: connected` when sign-in can work. A missing or unreachable database is shown on the sign-in and registration forms.
+
 ## Environment
 
 Copy `.env.example` to `.env` and update the values if needed.
